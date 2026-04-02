@@ -1,1 +1,53 @@
 
+
+---
+
+# `project_rules.md`
+
+```markdown
+# Project Rules: Medical Insurance Backend System
+
+## 1. Strict Layer Separation (Clean Architecture)
+- **Description:** Enforce `Handler/Controller → Service → Repository → DTO`. Handlers parse HTTP and call services. Services contain pure business logic. Repositories handle DB access only. No cross-layer imports.
+- **Why:** Guarantees testability, isolates compliance-heavy logic, and enables independent scaling of API/data layers.
+- **Example:** `ClaimController.parse()` → `AdjudicationService.evaluate()` → `ClaimRepository.save()`. Services never import `express/fastify` or raw query builders.
+
+## 2. API Standards & Idempotent Mutations
+- **Description:** All endpoints return versioned, envelope-wrapped JSON (`{ data, meta, errors }`). Financial/claim mutations require `Idempotency-Key` headers and deterministic retry handling.
+- **Why:** Ensures client SDK stability, simplifies network retry logic, and meets payer/provider integration standards.
+- **Example:** `POST /v1/claims` with header `Idempotency-Key: uuid-v4`. Response always includes `requestId` and `processingTime`.
+
+## 4. DTO/Entity Mapping & Data Exposure
+- **Description:** Never expose internal DB models directly to external APIs. Map through explicit DTOs with field-level access control. Strip or mask internal metrics/risk scores.
+- **Why:** Prevents accidental PHI/PII leakage, reduces payload overhead, and decouples DB schema from API contracts.
+- **Example:** `ClaimResponseDTO` includes `claimId, memberMaskedSSN, status, coverageDetails` but excludes `internalRiskScore, underwriterNotes`.
+
+## 5. PR & Deployment Workflow
+- **Description:** All PRs require ≥2 approvals, passing CI (lint, test, build, security scan), and a linked tracking ticket. No direct pushes to `main`. Deployment requires successful staging integration tests.
+- **Why:** Enforces accountability, catches regressions before production, and maintains audit trails for compliance reviews.
+- **Example:** PR template enforces: `✅ Tests Added`, `🔒 Security Review Passed`, `📖 Docs Updated`, `🎫 Ticket Linked`.
+
+## 6. Migration & Dependency Management
+- **Description:** Database migrations must be backward-compatible (additive only during rolling deploys). Version all dependencies via lockfiles. Pin major versions.
+- **Why:** Ensures zero-downtime deployments, prevents dependency drift, and guarantees reproducible builds across environments.
+- **Example:** Migration sequence: `1_add_column` → deploy → backfill → `2_remove_deprecated_column`. `package.json` uses exact versions or `^major` only.
+
+## 7. Input Validation & Sanitization
+- **Description:** Validate ALL inputs at the transport boundary using strict, typed schemas. Reject early. Use parameterized queries/prepared statements exclusively. Never concatenate raw SQL or shell commands.
+- **Why:** Prevents SQLi, XSS, malformed claim submissions, and unauthorized data mutations.
+- **Example:** Zod schema: `memberId: z.string().uuid()`, `premiumAmount: z.number().min(0)`. DB query: `pool.query('SELECT * FROM claims WHERE id = $1', [id])`.
+
+## 8. PHI/PII Handling & Audit Logging
+- **Description:** Never log, cache, or expose Protected Health Information (PHI) or Personally Identifiable Information (PII). Mask sensitive fields in logs and non-privileged responses. Emit immutable audit events for all create/update/delete on claims/policies/payments.
+- **Why:** Mandatory for HIPAA/GDPR compliance. Enables regulatory audits, dispute resolution, and breach containment.
+- **Example:** Log: `{"level":"info","event":"claim_updated","claimId":"...","actor":"adjuster_42","maskedSSN":"***-**-6789"}`. Audit table includes `diff`, `timestamp`, `ip_address`, `user_agent`.
+
+## 9. AI Context Referencing & Pattern Consistency
+- **Description:** When generating code, always reference existing DTOs, repository interfaces, error enums, and service patterns. Do not invent new architectural patterns unless explicitly requested. Follow established error-handling and transaction scopes.
+- **Why:** Maintains architectural consistency across the codebase, prevents fragmentation, and ensures AI output integrates seamlessly with existing modules.
+- **Example:** Use existing `@/domain/errors/ClaimErrors.ts` instead of throwing raw `new Error()`. Extend `BaseService` for transaction management.
+
+## 10. Deterministic Business Logic & Calculations
+- **Description:** All financial calculations (premiums, copays, deductibles, prorate refunds) must be deterministic, idempotent, and unit-tested against edge cases (leap years, timezone shifts, overlapping coverage).
+- **Why:** Insurance systems require mathematical precision. Non-deterministic logic causes claim disputes, revenue leakage, and compliance violations.
+- **Example:** `calculateDeductibleRemaining(coverage, date, timezone)` uses `UTC` internally, applies `Math.floor` for cents, and returns exact integer values. No floating-point currency math.
